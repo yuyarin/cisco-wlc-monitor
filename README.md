@@ -18,3 +18,8 @@ If you like to update periodically, for example, each 10 seconds, please use `wa
         ap03    10.0.5.51     up     11    0 |||||      44   12 ||||||| 
         ap04    10.0.5.52     up      1    2 |||||      40    8 ||||||  
         ap05    10.0.5.53     up      1    0 ||||       48    5 ||||||  
+
+# Requirement
+
+* Ruby >= 2.0.0-p247
+** SNMP Library for Ruby >= 1.1.0
