@@ -1,0 +1,253 @@
+#!/bin/env ruby
+#
+# Cisco WLC Status Viewer
+#   Yuya Kawakami <kawakami@mfeed.ad.jp>
+#
+
+require 'snmp'
+require 'pp'
+
+class WLC
+	
+	attr_reader :data
+	
+	AIRESPACE_WIRELESS_MIB = '1.3.6.1.4.1.14179'
+	
+	def initialize host: 'localhost', community: ''
+		@host = host
+		@community = community
+		@snmp_manager = SNMP::Manager.new(:Host => host, :Community => community, :timeout => 1, :retries => 1)
+		@data = {}
+	end
+	
+	def update_ap_list
+		# AIRESPACE-WIRELESS-MIB::bsnAPDot3MacAddress
+		oid = "#{AIRESPACE_WIRELESS_MIB}.2.2.1.1.1"
+		aps = {}
+		begin
+			@snmp_manager.walk(oid) do |var_bind|
+				base_radio_mac = var_bind.value.each_char.map{|c| sprintf("%02x", c.unpack('C')[0])}.join(':')
+				ap = AP.new(base_radio_mac: base_radio_mac, snmp_manager: @snmp_manager)
+				aps[base_radio_mac] = {
+					:dot3_mac_address => base_radio_mac,
+					:ap_name => ap.ap_name,
+					:operation_status => ap.operation_status,
+					:model => ap.model,
+					:serial_number => ap.serial_number,
+					:ip_address => ap.ip_address,
+					:type => ap.type,
+					:vlan_name => ap.group_vlan_name,
+					:channel_assignment => {
+						:bgn => ap.channel_assignment(radio: :bgn),
+						:an  => ap.channel_assignment(radio: :an),
+					},
+					:channel_number => {
+						:bgn => ap.channel_number(radio: :bgn),
+						:an  => ap.channel_number(radio: :an),
+					},
+					:tx_power_control => {
+						:bgn => ap.tx_power_control(radio: :bgn),
+						:an  => ap.tx_power_control(radio: :an),
+					},
+					:if_phy_tx_power_level => {
+						:bgn => ap.if_phy_tx_power_level(radio: :bgn),
+						:an  => ap.if_phy_tx_power_level(radio: :an),
+					},
+					:if_no_of_users => {
+						:bgn => ap.if_no_of_users(radio: :bgn),
+						:an  => ap.if_no_of_users(radio: :an),
+					},
+				}
+			end
+		end
+		@data[:ap] = aps
+	end
+	
+	def update_ess_list
+		# bsnDot11EssSsid
+		oids = [
+			# bsnDot11EssIndex
+			"#{AIRESPACE_WIRELESS_MIB}.2.1.1.1.1", 
+			# bsnDot11EssSsid
+			"#{AIRESPACE_WIRELESS_MIB}.2.1.1.1.2", 
+			# bsnDot11EssNumberOfMobileStations
+			"#{AIRESPACE_WIRELESS_MIB}.2.1.1.1.38", 
+		]
+		begin
+			esses = {}
+			@snmp_manager.walk(oids) do |index, ssid, number_of_mobile_stations|
+				index = index.value.to_i
+				esses[index] = {
+					:index => index,
+					:ssid => ssid.value, 
+					:number_of_mobile_stations => number_of_mobile_stations.value.to_i,
+				}
+			end
+			@data[:ess] = esses
+		rescue ::SNMP::RequestTimeout
+			return nil
+		end
+	end
+	
+	def update
+		update_ap_list
+		update_ess_list
+	end
+end
+
+
+class AP
+	
+	AIRESPACE_WIRELESS_MIB = '1.3.6.1.4.1.14179'
+	
+	def initialize base_radio_mac: '', snmp_manager: nil
+		unless /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/ =~ base_radio_mac
+			raise "Malformed base_radio_mac:  #{base_radio_mac}"
+		end
+		unless snmp_manager
+			raise "SNMP Manager is not given"
+		end
+		@base_radio_mac = base_radio_mac
+		@snmp_manager = snmp_manager
+		@base_radio_mac_mib = @base_radio_mac.split(':').map{|n| n.hex}.join('.')
+	end
+	
+	def icmp_ping
+		
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPName
+	def ap_name
+		r = get_mib(oid: '2.2.1.1.3', type: :string)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPOperationStatus
+	def operation_status
+		r = get_mib(oid: '2.2.1.1.6', type: :integer)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPModel
+	def model
+		r = get_mib(oid: '2.2.1.1.16', type: :string)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPSerialNumber
+	def serial_number
+		r = get_mib(oid: '2.2.1.1.17', type: :string)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnApIpAddress
+	def ip_address
+		r = get_mib(oid: '2.2.1.1.19', type: :ipaddress)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPType
+	def type
+		r = get_mib(oid: '2.2.1.1.22', type: :string)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPGroupVlanName
+	def group_vlan_name
+		r = get_mib(oid: '2.2.1.1.30', type: :string)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPIOSVersion
+	def ios_version
+		r = get_mib(oid: '2.2.1.1.31', type: :string)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPIfPhyChannelAssignment
+	# 1: automatic
+	def channel_assignment radio: :bgn
+		r = get_mib(oid: '2.2.2.1.3', type: :integer, radio: radio)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPIfPhyChannelNumber
+	def channel_number radio: :bgn
+		r = get_mib(oid: '2.2.2.1.4', type: :integer, radio: radio)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPIfPhyTxPowerControl
+	# 1: automatic
+	def tx_power_control radio: :bgn
+		r = get_mib(oid: '2.2.2.1.5', type: :integer, radio: radio)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnAPIfPhyTxPowerLevel
+	def if_phy_tx_power_level radio: :bgn
+		r = get_mib(oid: '2.2.2.1.6', type: :integer, radio: radio)
+	end
+	
+	# AIRESPACE-WIRELESS-MIB::bsnApIfNoOfUsers
+	def if_no_of_users radio: :bgn
+		r = get_mib(oid: '2.2.2.1.15', type: :integer, radio: radio)
+	end
+	
+private
+	def get_mib oid: nil, type: nil, radio: nil
+		return nil unless oid
+		oid = "#{AIRESPACE_WIRELESS_MIB}.#{oid}.#{@base_radio_mac_mib}"
+		if radio
+			radio_mib = (radio==:an or radio=='an') ? '1' : '0'
+			oid += ".#{radio_mib}"
+		end
+		begin
+			r = @snmp_manager.get_value(oid)
+			case type
+			when :integer
+				r = r.to_i
+			when :string
+				r = r.to_s
+			when :ipaddress
+				r = r.to_s
+			end
+			return r
+		rescue ::SNMP::RequestTimeout
+			return nil
+		end
+	end
+end
+
+def visualize_power_level level
+	'|'*(8-level)
+end
+
+def visualize_status status
+	if status == 1
+		"\e[42m  up  \e[0m"
+	else
+		"\e[41m down \e[0m"
+	end
+end
+	
+	if ARGV[0].size < 2
+		puts "usage: wlcmon <wlc_host> <snmp_community>"
+		exit
+	end
+	wlc_host = ARGV[0]
+	snmp_community = ARGV[1]
+	
+	wlc = WLC.new(host: wlc_host, community: snmp_community)
+	wlc.update
+	
+	# todo: clean up
+	puts sprintf('%16s %4s', "SSID", "#Sta")
+	wlc.data[:ess].sort_by{|index, ess| ess[:ssid]}.each do |index, ess|
+		puts sprintf('%16s %4s', ess[:ssid], ess[:number_of_mobile_stations])
+	end
+	
+	puts "                                 2.4g(b/g/n)        5.0g(a/n)"
+	puts sprintf('%-12s %-12s %-6s %-4s %-4s %-8s %-4s %-4s %-8s', 'Name', 'Address', 'Status', 'Ch#', '#Sta', 'TxPwr','Ch#', '#Sta', 'TxPwr')
+	wlc.data[:ap].sort_by{|mac, ap| ap[:ap_name]}.each do |mac, ap|
+		puts sprintf('%12s %12s %4s %4d %4d %-8s %4d %4d %-8s', 
+			ap[:ap_name], 
+			ap[:ip_address], 
+			visualize_status(ap[:operation_status]), 
+			ap[:channel_number][:bgn], 
+			ap[:if_no_of_users][:bgn], 
+			visualize_power_level(ap[:if_phy_tx_power_level][:bgn]), 
+			ap[:channel_number][:an], 
+			ap[:if_no_of_users][:an], 
+			visualize_power_level(ap[:if_phy_tx_power_level][:an]), 
+		)
+	end
