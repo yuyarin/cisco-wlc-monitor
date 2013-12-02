@@ -1,6 +1,9 @@
 # How To Use
+
     wlcmon <wlc_host> <snmp_community>
-If you like to update periodically, for example, each 10 seconds, please use `watch` command
+
+If you like to update periodically, for example, each 10 seconds, please use `watch` command:
+
     watch -n 10 wlcmon <wlc_host> <snmp_community>
 
 # Sample Output
