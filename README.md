@@ -22,4 +22,4 @@ If you like to update periodically, for example, each 10 seconds, please use `wa
 # Requirement
 
 * Ruby >= 2.0.0-p247
-** SNMP Library for Ruby >= 1.1.0
+    ** SNMP Library for Ruby >= 1.1.0
