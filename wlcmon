@@ -90,9 +90,25 @@ class WLC
 		end
 	end
 	
+	def update_station_list
+		stations = {}
+		# bsnMobileStationMacAddress
+		oid = "#{AIRESPACE_WIRELESS_MIB}.2.1.4.1.1"
+		begin
+			@snmp_manager.walk(oid) do |var_bind|
+				mac_address = var_bind.value.each_char.map{|c| sprintf("%02x", c.unpack('C')[0])}.join(':')
+				stations[mac_address] = {
+					:mac_address => mac_address,
+				}
+			end
+		end
+		@data[:station] = stations
+	end
+	
 	def update
 		update_ap_list
 		update_ess_list
+		update_station_list
 	end
 end
 
@@ -216,6 +232,26 @@ private
 	end
 end
 
+class OUIResolver
+	def initialize file
+		@ouis = {}
+		File.read(file).each_line do |line|
+			next if /^#/ =~ line
+			oui, vendor = line.split(/\t/)
+			@ouis[oui] = vendor.strip
+		end
+	end
+	
+	def lookup mac
+		if mac
+			oui = mac.to_s.gsub(':', '')[0,6].upcase
+			@ouis[oui]
+		else
+			nil
+		end
+	end
+end
+
 def visualize_power_level level
 	'|'*(8-level)
 end
@@ -245,13 +281,15 @@ end
 	wlc.update
 	
 	# todo: clean up
+	puts "[ESSID]"
 	puts sprintf('%16s %4s', "SSID", "#Sta")
 	wlc.data[:ess].sort_by{|index, ess| ess[:ssid]}.each do |index, ess|
 		puts sprintf('%16s %4s', ess[:ssid], ess[:number_of_mobile_stations])
 	end
 	
-	puts "                                     2.4g(b/g/n)        5.0g(a/n)"
-	puts sprintf('%-12s %-12s %-10s %-4s %-4s %-8s %-4s %-4s %-8s', 'Name', 'Address', 'Status', 'Ch#', '#Sta', 'TxPwr','Ch#', '#Sta', 'TxPwr')
+	puts ""
+	puts "[AP]                                 2.4g(b/g/n)        5.0g(a/n)"
+	puts sprintf('%-12s %-12s %-10s %4s %4s %-8s %4s %4s %-8s', 'Name', 'Address', 'Status', 'Ch#', '#Sta', 'TxPwr','Ch#', '#Sta', 'TxPwr')
 	wlc.data[:ap].sort_by{|mac, ap| ap[:ap_name]}.each do |mac, ap|
 		puts sprintf('%-12s %-12s %10s %4d %4d %-8s %4d %4d %-8s', 
 			ap[:ap_name], 
@@ -264,4 +302,25 @@ end
 			ap[:if_no_of_users][:an], 
 			visualize_power_level(ap[:if_phy_tx_power_level][:an]), 
 		)
+	end
+	
+	puts ""
+	puts "[Mobile Station]"
+	oui_resolver = OUIResolver.new('./data/ieee-oui.txt')
+	vendors = {}
+	wlc.data[:station].each do |mac, station|
+		vendor = oui_resolver.lookup station[:mac_address]
+		if vendor
+			vendors[vendor] = 0 unless vendors[vendor]
+			vendors[vendor] += 1
+		else
+			puts "not found: #{station[:mac_address]}"
+		end
+	end
+	puts sprintf("%-16s %4s %5s", "Vendor", "#", "%")
+	n = 1
+	vendors.sort_by{|vendor, num| -num }.each do|vendor, num|
+		puts sprintf("%-16s %4d %5.1f", vendor[0,16], num, 100.0*num/wlc.data[:station].size)
+		n += 1
+		break if n > 10
 	end
