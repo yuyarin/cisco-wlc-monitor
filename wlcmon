@@ -313,8 +313,6 @@ end
 		if vendor
 			vendors[vendor] = 0 unless vendors[vendor]
 			vendors[vendor] += 1
-		else
-			puts "not found: #{station[:mac_address]}"
 		end
 	end
 	puts sprintf("%-16s %4s %5s", "Vendor", "#", "%")
