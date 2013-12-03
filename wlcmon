@@ -32,6 +32,7 @@ class WLC
 					:dot3_mac_address => base_radio_mac,
 					:ap_name => ap.ap_name,
 					:operation_status => ap.operation_status,
+					:admin_status => ap.admin_status,
 					:model => ap.model,
 					:serial_number => ap.serial_number,
 					:ip_address => ap.ip_address,
@@ -156,6 +157,13 @@ class AP
 		r = get_mib(oid: '2.2.1.1.31', type: :string)
 	end
 	
+	# AIRESPACE-WIRELESS-MIB::bsnAPAdminStatus
+	# 1: enable
+	# 2: disable
+	def admin_status
+		r = get_mib(oid: '2.2.1.1.37', type: :integer)
+	end
+	
 	# AIRESPACE-WIRELESS-MIB::bsnAPIfPhyChannelAssignment
 	# 1: automatic
 	def channel_assignment radio: :bgn
@@ -212,12 +220,18 @@ def visualize_power_level level
 	'|'*(8-level)
 end
 
-def visualize_status status
-	if status == 1
-		"\e[42m  up  \e[0m"
-	else
-		"\e[41m down \e[0m"
+def visualize_status operation_status, admin_status, width=10
+	status = :disabled
+	if admin_status==1
+		status = operation_status == 1 ? :up : :down
 	end
+	
+	colors = {:up => "\e[42m", :down => "\e[41m", :disabled => "\e[47m"}
+	strings = {:up => "Up", :down => "Down", :disabled => "Disabled"}
+	white_space = ' '*((width - strings[status].length)/2)
+	string = "#{white_space}#{strings[status]}#{white_space}"[0,width]
+	reset_color = "\e[0m"
+	"#{colors[status]}#{string}#{reset_color}"
 end
 	
 	if ARGV[0].size < 2
@@ -236,13 +250,13 @@ end
 		puts sprintf('%16s %4s', ess[:ssid], ess[:number_of_mobile_stations])
 	end
 	
-	puts "                                 2.4g(b/g/n)        5.0g(a/n)"
-	puts sprintf('%-12s %-12s %-6s %-4s %-4s %-8s %-4s %-4s %-8s', 'Name', 'Address', 'Status', 'Ch#', '#Sta', 'TxPwr','Ch#', '#Sta', 'TxPwr')
+	puts "                                     2.4g(b/g/n)        5.0g(a/n)"
+	puts sprintf('%-12s %-12s %-10s %-4s %-4s %-8s %-4s %-4s %-8s', 'Name', 'Address', 'Status', 'Ch#', '#Sta', 'TxPwr','Ch#', '#Sta', 'TxPwr')
 	wlc.data[:ap].sort_by{|mac, ap| ap[:ap_name]}.each do |mac, ap|
-		puts sprintf('%12s %12s %4s %4d %4d %-8s %4d %4d %-8s', 
+		puts sprintf('%-12s %-12s %10s %4d %4d %-8s %4d %4d %-8s', 
 			ap[:ap_name], 
 			ap[:ip_address], 
-			visualize_status(ap[:operation_status]), 
+			visualize_status(ap[:operation_status], ap[:admin_status]), 
 			ap[:channel_number][:bgn], 
 			ap[:if_no_of_users][:bgn], 
 			visualize_power_level(ap[:if_phy_tx_power_level][:bgn]), 
